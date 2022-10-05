@@ -27,7 +27,7 @@ sigmaNullFunctions=function(a_sigma, b_sigma){
   variance_constant = b_sigma
   
   loglikelihood = function(data, mu){
-    constant*log(1+(data-mu)^2/(2*variance_constant))
+    -constant*log(1+(data-mu)^2/(2*variance_constant))
   }
   
   return(list(WUpdate=WUpdate, D2invUpdate = D2invUpdate,
@@ -126,7 +126,7 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
   # first lpost
   F_h = matrix((pmax(predeta,0)+eps)*eta*phieta*
            rep((pmax(predlambda,0)+eps)*lambda*philambda, each=n), n, p)
-  lpost[1] = -sum(listfunction$loglikelihood(z, mu = F_h)) +
+  lpost[1] = sum(listfunction$loglikelihood(z, mu = F_h), na.rm = T) +
     dinvgamma(vartheta, hyperparameter$a_theta, hyperparameter$b_theta,log=T)+
     sum(dnorm(eta,0,1, log=T)) + sum(dnorm(lambda,0,sqrt(vartheta), log=T)) +
     sum(dnorm(betaeta, meanBetaeta, 1, log=T)) + sum(dnorm(betalambda, meanBetalambda,1, log=T)) +
@@ -141,14 +141,14 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
       Weta = listfunction$WUpdate(n, predeta, lambda[wphilambda], predlambda[wphilambda], eps)
       barz = c(z[,wphilambda])/Weta
       D2inveta = listfunction$D2invUpdate(lwphilambda, Weta, barz, eta, hyperparameter$b_sigma)
-      Diageta = (rowSums(matrix(D2inveta,n,lwphilambda))+ constant_update)^{-1}
-      eta = Diageta*rowSums(matrix(D2inveta*barz, n,lwphilambda))
+      Diageta = (rowSums(matrix(D2inveta,n,lwphilambda), na.rm = T)+ constant_update)^{-1}
+      eta = Diageta*rowSums(matrix(D2inveta*barz, n,lwphilambda), na.rm=T)
     }else{ eta = rnorm(n,0, 0.1)}
           
     # update phieta
     Fh_phieta1 = matrix((pmax(predeta,0)+eps)*eta*
                           rep((pmax(predlambda,0)+eps)*lambda*philambda, each=n), n, p)
-    lphieta = -listfunction$constant * rowSums(loglikz-listfunction$loglikelihood(z, mu=Fh_phieta1))
+    lphieta = rowSums(loglikz-listfunction$loglikelihood(z, mu=Fh_phieta1), na.rm =T)
     wphieta.tmp = which(lphieta < lratio_cn)
     lwphieta.tmp = length(wphieta.tmp)
     # if every row is equal to zero: we skip the iteration but removing lambda = 0
@@ -167,8 +167,10 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
       Wbetaeta = listfunction$WUpdate_beta(length(Seta), predlambda[wphilambda], eta[Seta], lambda[wphilambda], eps)
       barzseta = c(z[Seta,wphilambda])/Wbetaeta
       D2invbetaeta = listfunction$D2invUpdate_beta(lwphilambda, Wbetaeta, barzseta, predeta[Seta], eps)
-      xD2inv = D2invbetaeta *matrix(rep(t(x[Seta,]), lwphilambda), ncol=qx, byrow=TRUE) 
+      xD2inv = D2invbetaeta *matrix(rep(t(x[Seta,]), lwphilambda), ncol=qx, byrow=TRUE)
+      xD2inv[is.na(xD2inv)] = 0  # to deal with the NA in crossprod
       Diagetabeta = solve(crossprod(matrix(rep(t(x[Seta,]), lwphilambda), ncol=qx,byrow=TRUE), xD2inv)+ diag(constant_update,qx))
+      barzseta[is.na(barzseta)] = 0  # to deal with the NA in crossprod
       betaeta.tmp = Diagetabeta%*%(crossprod(xD2inv, barzseta)+ constant_update*meanBetaeta)
       if(!is.nan(sum(betaeta.tmp))){
         predeta.tmp = drop(x%*%betaeta.tmp)
@@ -176,8 +178,8 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
                            rep((pmax(predlambda,0)+eps)*lambda*philambda, each=n), n, p)
         F_h = matrix((pmax(predeta,0)+eps)*eta*phieta*
                        rep((pmax(predlambda,0)+eps)*lambda*philambda, each=n), n, p)
-        if(-sum(listfunction$loglikelihood(z, mu = F_h))+ sum(dnorm(betaeta, meanBetaeta,1, log=T))<
-           -sum(listfunction$loglikelihood(z, mu = F_h.tmp))+ sum(dnorm(betaeta.tmp, meanBetaeta,1, log=T))){
+        if(sum(listfunction$loglikelihood(z, mu = F_h), na.rm = T)+ sum(dnorm(betaeta, meanBetaeta,1, log=T))<
+           sum(listfunction$loglikelihood(z, mu = F_h.tmp), na.rm = T)+ sum(dnorm(betaeta.tmp, meanBetaeta,1, log=T))){
           betaeta = betaeta.tmp
         }else{
           betaeta = betaeta + (betaeta.tmp-betaeta)/10
@@ -193,8 +195,8 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
       Wlambda = listfunction$WUpdate(p, predlambda, eta[wphieta], predeta[wphieta], eps)
       barzt = c(t(z[wphieta,]))/Wlambda
       D2invlambda = listfunction$D2invUpdate(lwphieta, Wlambda, barzt, lambda, hyperparameter$b_sigma)
-      Diaglambda = (colSums(matrix(D2invlambda,lwphieta, p, byrow=T)) + constant_update/vartheta)^{-1}
-      lambda = Diaglambda*colSums(matrix(D2invlambda*barzt, lwphieta ,p, byrow = T))
+      Diaglambda = (colSums(matrix(D2invlambda,lwphieta, p, byrow=T), na.rm = T) + constant_update/vartheta)^{-1}
+      lambda = Diaglambda*colSums(matrix(D2invlambda*barzt, lwphieta ,p, byrow = T), na.rm = T)
     }else{
       lambda = rnorm(p, 0,0.01)
     }
@@ -202,7 +204,7 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
     # update philambda. 
     Fh_philambda1 = matrix((pmax(predeta,0)+eps)*eta*phieta*
                           rep((pmax(predlambda,0)+eps)*lambda, each=n), n, p)
-    lphilambda = -listfunction$constant * colSums(loglikz-listfunction$loglikelihood(z, mu=Fh_philambda1))
+    lphilambda = colSums(loglikz-listfunction$loglikelihood(z, mu=Fh_philambda1), na.rm = T)
     wphilambda.tmp = which(lphilambda<lratio_cp )
     lwphilambda.tmp = length(wphilambda.tmp)
     # if every col is equal to zero: we skip the iteration but removing lambda = 0
@@ -222,7 +224,9 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
       tbarzslambda = c(t(z[wphieta, Slambda]))/Wbetalambda
       D2invbetalambda = listfunction$D2invUpdate_beta(lwphieta, Wbetalambda, tbarzslambda, predlambda[Slambda], eps)
       wD2inv = D2invbetalambda*matrix(rep(t(w[Slambda,]), lwphieta),ncol=qw,byrow=TRUE)
+      wD2inv[is.na(wD2inv)] = 0  # to deal with the NA in crossprod
       Diaglambdabeta = solve(crossprod(matrix(rep(t(w[Slambda,]), lwphieta),ncol=qw,byrow=TRUE),wD2inv)+ diag(constant_update,qw))
+      tbarzslambda[is.na(tbarzslambda)] = 0  # to deal with the NA in crossprod
       betalambda.tmp = Diaglambdabeta%*%(crossprod(wD2inv, tbarzslambda)+ constant_update*meanBetalambda)
       if(!is.nan(sum(betalambda.tmp))){
         predlambda.tmp = drop(w%*%betalambda.tmp)
@@ -230,8 +234,8 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
                            rep((pmax(predlambda.tmp,0)+eps)*lambda*philambda, each=n), n, p)
         F_h = matrix((pmax(predeta,0)+eps)*eta*phieta*
                        rep((pmax(predlambda,0)+eps)*lambda*philambda, each=n), n, p)
-        if(-sum(listfunction$loglikelihood(z, mu = F_h))+ sum(dnorm(betalambda, meanBetalambda,1, log=T))<
-           -sum(listfunction$loglikelihood(z, mu = F_h.tmp))+ sum(dnorm(betalambda.tmp, meanBetalambda,1, log=T))){
+        if(sum(listfunction$loglikelihood(z, mu = F_h), na.rm = T)+ sum(dnorm(betalambda, meanBetalambda,1, log=T))<
+           sum(listfunction$loglikelihood(z, mu = F_h.tmp), na.rm = T)+ sum(dnorm(betalambda.tmp, meanBetalambda,1, log=T))){
           betalambda = betalambda.tmp
         }else{
           betalambda = betalambda + (betalambda.tmp-betalambda)/10
@@ -264,7 +268,7 @@ xfileCoordinateMM = function(y, n=nrow(y), p=ncol(y), x=NULL, w=NULL, M_h=matrix
     BetaLambda[t+1,] = betalambda
     
     # log posterior
-    lpost[t+1] = -sum(listfunction$loglikelihood(z, mu = F_h)) +
+    lpost[t+1] = sum(listfunction$loglikelihood(z, mu = F_h), na.rm =T) +
       dinvgamma(vartheta, hyperparameter$a_theta, hyperparameter$b_theta,log=T)+
       sum(dnorm(eta,0,1, log=T)) + sum(dnorm(lambda,0,sqrt(vartheta), log=T)) +
       sum(dnorm(betaeta, meanBetaeta, 1, log=T)) + sum(dnorm(betalambda, meanBetalambda,1, log=T)) +
@@ -329,6 +333,8 @@ xfile = function(y, x=NULL, w=NULL, hyperparameter,
   BetaLambda = Factors[[1]]$BetaLambda[n_it,]
   LogPosterior = c(Factors[[1]]$LogPosterior[1], Factors[[1]]$LogPosterior[n_it])
   
+  cat("Factor 1 estimated \n")
+  
   h=2
   end=F
   while((end==F)&(h<(max_nfact+1))){
@@ -343,7 +349,7 @@ xfile = function(y, x=NULL, w=NULL, hyperparameter,
     Zresidualtmp = Factors[[h]]$Z[n_it,,]
     lF = listfunction$loglikelihood(Zresidualtmp, mu=Factors[[h]]$F_h)
 
-    if(log( alpha_ratio^(h+1) -1) < listfunction$constant * sum(l0-lF)){
+    if(log( alpha_ratio^(h+1) -1) < sum(lF-l0, na.rm = T)){
       M_h = M_h + Factors[[h]]$F_h
       Zresidual = Zresidualtmp-Factors[[h]]$F_h
       Vartheta = c(Vartheta, Factors[[h]]$Vartheta[n_it])
@@ -354,6 +360,8 @@ xfile = function(y, x=NULL, w=NULL, hyperparameter,
       PhiLambda = cbind(PhiLambda, Factors[[h]]$PhiLambda[n_it,])
       BetaLambda = cbind(BetaLambda, Factors[[h]]$BetaLambda[n_it,])
       LogPosterior = c(LogPosterior, Factors[[h]]$LogPosterior[n_it])
+      
+      cat("Factor ",h," estimated \n")
       h = h+1
     }else{end=T}
     
@@ -375,18 +383,27 @@ xfile = function(y, x=NULL, w=NULL, hyperparameter,
 # xfile simulation
 #
 #
-xfileSimulation = function(n, p, k, c_n, c_p, epsilon = 0.1, x = matrix(1,n,1), w = matrix(1, p,1),
-                           data_distribution = "gaussian"){
+xfileSimulation = function(n, p, k, c_n, c_p, epsilon = 0.1, 
+                           x = matrix(1,n,1), w = matrix(1, p,1),
+                           data_distribution = "gaussian",
+                           data_generator_process = "additive",
+                           NA_frac = 0.25){
   qx = ncol(x)
   qw = ncol(w)
-  betaeta = matrix(rnorm(qx*k,0,1), qx,k)
-  betaeta = betaeta+ epsilon*2*sign(betaeta)
+  betaeta = matrix(rnorm(qx*k,0,1), qx, k)
+  betaeta = betaeta+ 2*epsilon*sign(betaeta)
   betalambda = matrix(rnorm(qw*k,0,1), qw,k)
-  betalambda = betalambda+ 0.3*sign(betalambda)
+  betalambda = betalambda+ 2*epsilon*sign(betalambda)
   
   eta = matrix(rnorm(n*k),n,k)
   eta = eta+ epsilon*2*sign(eta)
-  Eta0 = eta*(pmax(drop(x%*%betaeta),0)+epsilon)
+  if(data_generator_process == "additive"){
+    Eta0 = eta+(pmax(drop(x%*%betaeta),0)+epsilon)
+  }else if(data_generator_process == "multiplicative"){
+    Eta0 = eta*(pmax(drop(x%*%betaeta),0)+epsilon)
+  }else{
+    stop("The value of data_generator_process must be either multiplicative or additive")  
+  }
   for(h in 1:k){
     Eta0[order(abs(Eta0[,h]))[1:round((1-c_n)*n)], h] = 0
   }
@@ -394,13 +411,17 @@ xfileSimulation = function(n, p, k, c_n, c_p, epsilon = 0.1, x = matrix(1,n,1), 
   
   lambda = matrix(rnorm(p*k),p,k)
   lambda = lambda+ epsilon*2*sign(lambda)
-  Lambda0 = lambda*(pmax(drop(w%*%betalambda),0)+epsilon)
+  if(data_generator_process == "additive"){
+    Lambda0 = lambda+(pmax(drop(w%*%betalambda),0)+epsilon)
+  }else if(data_generator_process == "multiplicative"){
+    Lambda0 = lambda*(pmax(drop(w%*%betalambda),0)+epsilon)
+  }
   for(h in 1:k){
     Lambda0[order(abs(Lambda0[,h]))[1:round((1-c_p)*p)],h] = 0
   }
   Lambda0 = Lambda0[,order(apply(Lambda0,2,var) , decreasing=T)] 
   
-  z = tcrossprod(Eta0,Lambda0)+ matrix(rnorm(n*p, 0, sd=0.5),n,p)
+  z = tcrossprod(Eta0,Lambda0)+ matrix(rnorm(n*p, 0, sd=0.25),n,p)
   
   if(data_distribution %in% c("gaussian", "Gaussian", "normal", "Normal")){
     y = z
@@ -410,7 +431,22 @@ xfileSimulation = function(n, p, k, c_n, c_p, epsilon = 0.1, x = matrix(1,n,1), 
     y = pmax(z,0)
   }
   
-  return( list(y = y, z0 = z, Eta0 = Eta0, Lambda0 = Lambda0,
+  y_na = y
+  y_na[ sample(n*p, round(n*p*NA_frac))] = NA
+  na_col = colSums(is.na(y_na))
+  na_row = rowSums(is.na(y_na))
+  wnc = which(na_col == n)
+  if(length(wnc)>0){
+    swnc = sample(1:n,wnc)
+    y_na[swnc, wnc] = y[swnc, wnc]
+  }
+  wnr = which(na_col == p)
+  if(length(wnr)>0){
+    swnr = sample(1:p,wnr)
+    y_na[swnr, wnr] = y[swnr, wnr]
+  }
+
+  return( list(y = y, y_na = y_na, z0 = z, Eta0 = Eta0, Lambda0 = Lambda0,
                BetaEta0 = betaeta, BetaLambda0 = betalambda))
 }
 
